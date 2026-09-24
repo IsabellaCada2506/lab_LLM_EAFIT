@@ -1,14 +1,13 @@
 import streamlit as st
 from openai import OpenAI
 from PIL import Image
-import pytesseract
+import easyocr
+import numpy as np
 import re
-import math
-from collections import Counter
 
 
 # ============================================================
-# CONFIGURACIÓN
+# CONFIGURACIÓN DE LA PÁGINA
 # ============================================================
 
 st.set_page_config(
@@ -18,9 +17,10 @@ st.set_page_config(
 )
 
 st.title("🖼️ OCR + LLM tipo GPT")
+
 st.write(
-    "Carga una imagen, extrae su texto mediante OCR y utiliza un LLM "
-    "para ampliar y explicar la información."
+    "Carga una imagen, extrae su texto mediante OCR y utiliza "
+    "un modelo GPT para ampliar y analizar la información."
 )
 
 
@@ -37,14 +37,16 @@ api_key = st.sidebar.text_input(
 )
 
 if not api_key:
-    st.info("Ingresa tu API Key de OpenAI en el menú lateral para comenzar.")
+    st.info(
+        "Ingresa tu API Key de OpenAI en el menú lateral para comenzar."
+    )
     st.stop()
 
 client = OpenAI(api_key=api_key)
 
 
 # ============================================================
-# CONFIGURACIÓN DEL MODELO
+# CONFIGURACIÓN DEL LLM
 # ============================================================
 
 st.sidebar.subheader("⚙️ Parámetros del LLM")
@@ -91,6 +93,21 @@ tipo_respuesta = st.sidebar.radio(
 
 
 # ============================================================
+# CARGAR MODELO OCR
+# ============================================================
+
+@st.cache_resource
+def cargar_ocr():
+
+    reader = easyocr.Reader(
+        ["es", "en"],
+        gpu=False
+    )
+
+    return reader
+
+
+# ============================================================
 # CARGAR IMAGEN
 # ============================================================
 
@@ -108,43 +125,77 @@ if imagen is not None:
 
     col1, col2 = st.columns(2)
 
+    # --------------------------------------------------------
+    # IMAGEN
+    # --------------------------------------------------------
+
     with col1:
+
         st.subheader("Imagen cargada")
+
         st.image(
             image,
             caption="Imagen original",
             use_container_width=True
         )
 
-    # ========================================================
+
+    # --------------------------------------------------------
     # OCR
-    # ========================================================
+    # --------------------------------------------------------
 
     with col2:
 
-        st.subheader("2. Texto extraído mediante OCR")
+        st.subheader("2. Extracción de texto")
 
         if st.button("🔍 Extraer texto"):
 
-            with st.spinner("Analizando imagen..."):
+            with st.spinner(
+                "Analizando imagen con OCR..."
+            ):
 
                 try:
 
-                    texto_ocr = pytesseract.image_to_string(
-                        image,
-                        lang="spa+eng"
+                    # Cargar EasyOCR
+                    reader = cargar_ocr()
+
+                    # Convertir imagen a formato compatible
+                    imagen_array = np.array(image)
+
+                    # Ejecutar OCR
+                    resultados = reader.readtext(
+                        imagen_array
                     )
 
-                    texto_ocr = texto_ocr.strip()
+                    # Extraer solamente los textos
+                    textos = []
+
+                    for resultado in resultados:
+
+                        texto_detectado = resultado[1]
+
+                        textos.append(
+                            texto_detectado
+                        )
+
+                    texto_ocr = " ".join(
+                        textos
+                    ).strip()
 
                     if texto_ocr:
 
-                        st.session_state["texto_ocr"] = texto_ocr
+                        st.session_state[
+                            "texto_ocr"
+                        ] = texto_ocr
+
+                        st.success(
+                            "Texto extraído correctamente."
+                        )
 
                     else:
 
                         st.warning(
-                            "No se pudo encontrar texto en la imagen."
+                            "No se encontró texto en la imagen."
                         )
 
                 except Exception as e:
@@ -162,125 +213,155 @@ if "texto_ocr" in st.session_state:
 
     texto_ocr = st.session_state["texto_ocr"]
 
+    st.subheader("Texto detectado por OCR")
+
     st.text_area(
-        "Texto detectado",
+        "Resultado del OCR",
         texto_ocr,
         height=200
     )
 
 
     # ========================================================
-    # GENERACIÓN DEL LLM
+    # PREPARAR ESTILO DE RESPUESTA
     # ========================================================
-
-    st.header("3. Ampliar información con el LLM")
 
     if tipo_respuesta == "Formal":
 
         estilo = """
         Utiliza un lenguaje formal, claro y profesional.
-        Explica la información de manera organizada.
-        Evita utilizar expresiones demasiado informales.
+        Organiza bien la información.
+        Utiliza explicaciones claras y evita expresiones informales.
         """
 
     else:
 
         estilo = """
         Utiliza un lenguaje técnico.
-        Explica los conceptos importantes con precisión.
+        Explica los conceptos con precisión.
         Incluye detalles técnicos cuando sean relevantes.
+        Utiliza términos propios del área correspondiente.
         """
 
+
+    # ========================================================
+    # GENERAR RESPUESTA CON GPT
+    # ========================================================
+
+    st.header("3. Ampliar información con GPT")
+
     prompt = f"""
-    Analiza el siguiente texto obtenido mediante OCR:
+Analiza el siguiente texto obtenido mediante OCR:
 
-    -------------------------
-    {texto_ocr}
-    -------------------------
+-------------------------
+{texto_ocr}
+-------------------------
 
-    Amplía y explica la información contenida en el texto.
+Amplía y explica la información contenida en el texto.
 
-    {estilo}
+{estilo}
 
-    No inventes información que no esté relacionada con el texto.
-    Organiza la respuesta utilizando párrafos y, cuando sea útil,
-    listas o subtítulos.
-    """
+La respuesta debe:
+- Explicar claramente la información.
+- Mantener relación con el texto original.
+- Organizar la información.
+- No inventar información que no esté relacionada con el texto.
+"""
 
     if st.button("🤖 Generar respuesta con GPT"):
 
-        with st.spinner("Generando respuesta..."):
+        with st.spinner(
+            "Generando respuesta..."
+        ):
 
             try:
 
                 respuesta = client.chat.completions.create(
                     model=modelo,
+
                     messages=[
                         {
                             "role": "system",
                             "content": (
-                                "Eres un asistente especializado en "
-                                "analizar y ampliar información obtenida "
-                                "mediante OCR."
+                                "Eres un asistente especializado "
+                                "en analizar textos obtenidos mediante OCR "
+                                "y ampliar su contenido."
                             )
                         },
+
                         {
                             "role": "user",
                             "content": prompt
                         }
                     ],
+
                     temperature=temperature,
                     max_tokens=max_tokens,
                     top_p=top_p
                 )
 
-                texto_generado = respuesta.choices[0].message.content
 
-                st.session_state["respuesta"] = texto_generado
+                texto_generado = (
+                    respuesta
+                    .choices[0]
+                    .message
+                    .content
+                )
 
-                # Guardar métricas de tokens
+
+                # Guardar respuesta
+                st.session_state[
+                    "respuesta"
+                ] = texto_generado
+
+
+                # Guardar tokens
                 if respuesta.usage:
 
-                    st.session_state["prompt_tokens"] = (
-                        respuesta.usage.prompt_tokens
-                    )
+                    st.session_state[
+                        "prompt_tokens"
+                    ] = respuesta.usage.prompt_tokens
 
-                    st.session_state["completion_tokens"] = (
-                        respuesta.usage.completion_tokens
-                    )
+                    st.session_state[
+                        "completion_tokens"
+                    ] = respuesta.usage.completion_tokens
 
-                    st.session_state["total_tokens"] = (
-                        respuesta.usage.total_tokens
-                    )
+                    st.session_state[
+                        "total_tokens"
+                    ] = respuesta.usage.total_tokens
+
 
             except Exception as e:
 
                 st.error(
-                    f"Ocurrió un error al utilizar el LLM: {e}"
+                    f"Ocurrió un error al utilizar GPT: {e}"
                 )
 
 
 # ============================================================
-# RESPUESTA DEL LLM
+# MOSTRAR RESPUESTA
 # ============================================================
 
 if "respuesta" in st.session_state:
 
-    st.header("4. Respuesta ampliada")
-
-    st.write(st.session_state["respuesta"])
-
-
-    # ========================================================
-    # MÉTRICAS
-    # ========================================================
-
-    st.header("5. Métricas del texto")
-
     texto_generado = st.session_state["respuesta"]
 
+    st.header("4. Respuesta ampliada")
+
+    st.write(
+        texto_generado
+    )
+
+
+    # ========================================================
+    # MÉTRICAS BÁSICAS
+    # ========================================================
+
+    st.header("5. Métricas del texto generado")
+
+
     # --------------------------------------------------------
-    # Métricas básicas
+    # Palabras
     # --------------------------------------------------------
 
     palabras = re.findall(
@@ -289,27 +370,58 @@ if "respuesta" in st.session_state:
         re.UNICODE
     )
 
-    cantidad_palabras = len(palabras)
-
-    cantidad_caracteres = len(texto_generado)
-
-    cantidad_oraciones = len(
-        re.findall(
-            r"[.!?]+",
-            texto_generado
-        )
-    )
-
-    if cantidad_oraciones == 0:
-        cantidad_oraciones = 1
-
-    promedio_palabras_oracion = (
-        cantidad_palabras / cantidad_oraciones
+    cantidad_palabras = len(
+        palabras
     )
 
 
     # --------------------------------------------------------
-    # Diversidad léxica
+    # Caracteres
+    # --------------------------------------------------------
+
+    cantidad_caracteres = len(
+        texto_generado
+    )
+
+
+    # --------------------------------------------------------
+    # Oraciones
+    # --------------------------------------------------------
+
+    oraciones = re.split(
+        r"[.!?]+",
+        texto_generado
+    )
+
+    oraciones = [
+        oracion.strip()
+        for oracion in oraciones
+        if oracion.strip()
+    ]
+
+    cantidad_oraciones = len(
+        oraciones
+    )
+
+
+    # --------------------------------------------------------
+    # Promedio de palabras por oración
+    # --------------------------------------------------------
+
+    if cantidad_oraciones > 0:
+
+        promedio_palabras_oracion = (
+            cantidad_palabras
+            / cantidad_oraciones
+        )
+
+    else:
+
+        promedio_palabras_oracion = 0
+
+
+    # --------------------------------------------------------
+    # Palabras únicas
     # --------------------------------------------------------
 
     palabras_minusculas = [
@@ -320,6 +432,7 @@ if "respuesta" in st.session_state:
     palabras_unicas = set(
         palabras_minusculas
     )
+
 
     if cantidad_palabras > 0:
 
@@ -334,23 +447,27 @@ if "respuesta" in st.session_state:
 
 
     # --------------------------------------------------------
-    # Complejidad aproximada
+    # Longitud promedio de palabra
     # --------------------------------------------------------
 
-    longitud_promedio_palabra = (
-        sum(
-            len(palabra)
-            for palabra in palabras
+    if cantidad_palabras > 0:
+
+        longitud_promedio = (
+            sum(
+                len(palabra)
+                for palabra in palabras
+            )
+            / cantidad_palabras
         )
-        / cantidad_palabras
-        if cantidad_palabras > 0
-        else 0
-    )
+
+    else:
+
+        longitud_promedio = 0
 
 
-    # --------------------------------------------------------
-    # Tokens del modelo
-    # --------------------------------------------------------
+    # ========================================================
+    # MÉTRICAS DE TOKENS
+    # ========================================================
 
     prompt_tokens = st.session_state.get(
         "prompt_tokens",
@@ -369,7 +486,7 @@ if "respuesta" in st.session_state:
 
 
     # ========================================================
-    # MOSTRAR MÉTRICAS
+    # MOSTRAR MÉTRICAS BÁSICAS
     # ========================================================
 
     col1, col2, col3, col4 = st.columns(4)
@@ -403,7 +520,7 @@ if "respuesta" in st.session_state:
         )
 
 
-    st.subheader("📊 Métricas lingüísticas")
+    st.subheader("📊 Otras medidas")
 
     col1, col2, col3 = st.columns(3)
 
@@ -417,241 +534,266 @@ if "respuesta" in st.session_state:
     with col2:
 
         st.metric(
-            "Promedio palabras/oración",
+            "Palabras por oración",
             f"{promedio_palabras_oracion:.2f}"
         )
 
     with col3:
 
         st.metric(
-            "Longitud promedio palabra",
-            f"{longitud_promedio_palabra:.2f}"
+            "Longitud promedio",
+            f"{longitud_promedio:.2f}"
         )
 
 
     # ========================================================
-    # MÉTRICAS SOLICITADAS POR EL EJERCICIO
+    # EVALUACIÓN CON EL MISMO LLM
     # ========================================================
 
-    st.subheader("📝 Evaluación del texto")
+    st.header(
+        "6. Evaluación del texto generado"
+    )
 
     st.write(
-        "Las siguientes métricas son indicadores aproximados "
-        "calculados a partir de características del texto."
+        "El modelo evalúa la respuesta generada "
+        "en cuatro aspectos: coherencia, semántica, "
+        "sintaxis y gramática."
     )
 
-    # --------------------------------------------------------
-    # Coherencia
-    # --------------------------------------------------------
 
-    oraciones = re.split(
-        r"[.!?]+",
-        texto_generado
-    )
+    if st.button(
+        "📊 Evaluar texto"
+    ):
 
-    oraciones = [
-        o.strip()
-        for o in oraciones
-        if o.strip()
-    ]
+        with st.spinner(
+            "Evaluando el texto..."
+        ):
 
-    if len(oraciones) > 1:
+            try:
 
-        longitudes = [
-            len(
-                re.findall(
-                    r"\b\w+\b",
-                    oracion
+                evaluacion_prompt = f"""
+Evalúa el siguiente texto generado por un modelo de lenguaje:
+
+-------------------------
+{texto_generado}
+-------------------------
+
+Evalúa los siguientes aspectos de 0 a 100:
+
+1. Coherencia:
+Qué tan bien están conectadas y organizadas las ideas.
+
+2. Semántica:
+Qué tan claro es el significado y qué tan adecuadamente
+se utilizan los conceptos.
+
+3. Sintaxis:
+Qué tan correctamente están construidas las oraciones.
+
+4. Gramática:
+Qué tan correctamente se utiliza la gramática.
+
+Responde ÚNICAMENTE utilizando exactamente este formato:
+
+Coherencia: número
+Semántica: número
+Sintaxis: número
+Gramática: número
+
+No agregues explicaciones.
+"""
+
+
+                evaluacion = client.chat.completions.create(
+                    model=modelo,
+
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Eres un evaluador de calidad "
+                                "lingüística de textos."
+                            )
+                        },
+
+                        {
+                            "role": "user",
+                            "content": evaluacion_prompt
+                        }
+                    ],
+
+                    temperature=0
                 )
-            )
-            for oracion in oraciones
-        ]
-
-        promedio = sum(longitudes) / len(longitudes)
-
-        diferencia = sum(
-            abs(x - promedio)
-            for x in longitudes
-        ) / len(longitudes)
-
-        coherencia = max(
-            0,
-            min(
-                100,
-                100 - diferencia * 2
-            )
-        )
-
-    else:
-
-        coherencia = 70
 
 
-    # --------------------------------------------------------
-    # Semántica
-    # --------------------------------------------------------
-
-    palabras_frecuentes = Counter(
-        palabras_minusculas
-    )
-
-    palabras_repetidas = sum(
-        1
-        for palabra, cantidad
-        in palabras_frecuentes.items()
-        if cantidad > 1
-    )
-
-    if cantidad_palabras > 0:
-
-        semantica = max(
-            0,
-            min(
-                100,
-                100 - (
-                    palabras_repetidas
-                    / cantidad_palabras
-                    * 100
+                resultado_evaluacion = (
+                    evaluacion
+                    .choices[0]
+                    .message
+                    .content
                 )
+
+
+                # Guardar evaluación
+                st.session_state[
+                    "evaluacion"
+                ] = resultado_evaluacion
+
+
+            except Exception as e:
+
+                st.error(
+                    f"Ocurrió un error durante la evaluación: {e}"
+                )
+
+
+    # ========================================================
+    # MOSTRAR EVALUACIÓN
+    # ========================================================
+
+    if "evaluacion" in st.session_state:
+
+        evaluacion = (
+            st.session_state["evaluacion"]
+        )
+
+        st.subheader(
+            "Resultados de evaluación"
+        )
+
+        st.code(
+            evaluacion
+        )
+
+
+        # ----------------------------------------------------
+        # Extraer valores
+        # ----------------------------------------------------
+
+        coherencia = re.search(
+            r"Coherencia:\s*(\d+)",
+            evaluacion,
+            re.IGNORECASE
+        )
+
+        semantica = re.search(
+            r"Semántica:\s*(\d+)",
+            evaluacion,
+            re.IGNORECASE
+        )
+
+        sintaxis = re.search(
+            r"Sintaxis:\s*(\d+)",
+            evaluacion,
+            re.IGNORECASE
+        )
+
+        gramatica = re.search(
+            r"Gramática:\s*(\d+)",
+            evaluacion,
+            re.IGNORECASE
+        )
+
+
+        # ----------------------------------------------------
+        # Convertir resultados
+        # ----------------------------------------------------
+
+        valor_coherencia = (
+            int(coherencia.group(1))
+            if coherencia
+            else 0
+        )
+
+        valor_semantica = (
+            int(semantica.group(1))
+            if semantica
+            else 0
+        )
+
+        valor_sintaxis = (
+            int(sintaxis.group(1))
+            if sintaxis
+            else 0
+        )
+
+        valor_gramatica = (
+            int(gramatica.group(1))
+            if gramatica
+            else 0
+        )
+
+
+        # ----------------------------------------------------
+        # Mostrar barras
+        # ----------------------------------------------------
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+
+            st.write("**Coherencia**")
+
+            st.progress(
+                min(valor_coherencia, 100)
             )
-        )
 
-    else:
-
-        semantica = 0
-
-
-    # --------------------------------------------------------
-    # Sintaxis
-    # --------------------------------------------------------
-
-    oraciones_validas = 0
-
-    for oracion in oraciones:
-
-        palabras_oracion = re.findall(
-            r"\b\w+\b",
-            oracion
-        )
-
-        if len(palabras_oracion) >= 3:
-
-            oraciones_validas += 1
-
-    if len(oraciones) > 0:
-
-        sintaxis = (
-            oraciones_validas
-            / len(oraciones)
-            * 100
-        )
-
-    else:
-
-        sintaxis = 0
-
-
-    # --------------------------------------------------------
-    # Gramática
-    # --------------------------------------------------------
-
-    errores_basicos = 0
-
-    for oracion in oraciones:
-
-        oracion = oracion.strip()
-
-        if not oracion:
-            continue
-
-        if not oracion[0].isupper():
-
-            errores_basicos += 1
-
-    if len(oraciones) > 0:
-
-        gramatica = max(
-            0,
-            100 - (
-                errores_basicos
-                / len(oraciones)
-                * 100
+            st.write(
+                f"{valor_coherencia}/100"
             )
-        )
-
-    else:
-
-        gramatica = 0
 
 
-    # ========================================================
-    # MOSTRAR INDICADORES
-    # ========================================================
+            st.write("**Semántica**")
 
-    col1, col2 = st.columns(2)
+            st.progress(
+                min(valor_semantica, 100)
+            )
 
-    with col1:
+            st.write(
+                f"{valor_semantica}/100"
+            )
 
-        st.write("**Coherencia**")
-        st.progress(
-            int(coherencia)
-        )
-        st.write(
-            f"{coherencia:.1f}/100"
-        )
 
-        st.write("**Semántica**")
-        st.progress(
-            int(semantica)
-        )
-        st.write(
-            f"{semantica:.1f}/100"
-        )
+        with col2:
 
-    with col2:
+            st.write("**Sintaxis**")
 
-        st.write("**Sintaxis**")
-        st.progress(
-            int(sintaxis)
-        )
-        st.write(
-            f"{sintaxis:.1f}/100"
-        )
+            st.progress(
+                min(valor_sintaxis, 100)
+            )
 
-        st.write("**Gramática**")
-        st.progress(
-            int(gramatica)
-        )
-        st.write(
-            f"{gramatica:.1f}/100"
-        )
+            st.write(
+                f"{valor_sintaxis}/100"
+            )
+
+
+            st.write("**Gramática**")
+
+            st.progress(
+                min(valor_gramatica, 100)
+            )
+
+            st.write(
+                f"{valor_gramatica}/100"
+            )
 
 
     # ========================================================
-    # TOKENS
+    # INFORMACIÓN DE LA CONFIGURACIÓN
     # ========================================================
 
-    st.subheader("🔢 Métricas de tokens")
+    st.header(
+        "7. Configuración utilizada"
+    )
 
-    col1, col2, col3 = st.columns(3)
+    configuracion = {
+        "Modelo": modelo,
+        "Temperature": temperature,
+        "Max tokens": max_tokens,
+        "Top P": top_p,
+        "Tipo de respuesta": tipo_respuesta
+    }
 
-    with col1:
-
-        st.metric(
-            "Tokens del prompt",
-            prompt_tokens
-        )
-
-    with col2:
-
-        st.metric(
-            "Tokens generados",
-            completion_tokens
-        )
-
-    with col3:
-
-        st.metric(
-            "Tokens totales",
-            total_tokens
-        )
+    st.table(
+        configuracion
+    )
