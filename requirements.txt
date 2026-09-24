@@ -8,4 +8,4 @@ pandas
 plotly
 openai
 pillow
-pytesseract
+easyocr
