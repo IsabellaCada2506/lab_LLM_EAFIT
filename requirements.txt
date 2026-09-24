@@ -1,1 +1,8 @@
 
+streamlit
+groq
+transformers
+scikit-learn
+numpy
+pandas
+plotly
