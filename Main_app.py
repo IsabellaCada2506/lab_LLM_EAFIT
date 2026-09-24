@@ -1,17 +1,16 @@
+```python
 import streamlit as st
 import pandas as pd
-import numpy as np
+import re
 
 from groq import Groq
 from transformers import AutoTokenizer
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-import plotly.express as px
-
 
 # ==========================================================
-# CONFIGURACIÓN DE LA PÁGINA
+# CONFIGURACIÓN
 # ==========================================================
 
 st.set_page_config(
@@ -20,17 +19,11 @@ st.set_page_config(
     layout="wide"
 )
 
-
-# ==========================================================
-# TÍTULO
-# ==========================================================
-
 st.title("🤖 LLM Explorer con Groq")
 
 st.write(
-    "Aplicación para explorar modelos de lenguaje, "
-    "tokens, Token IDs, Bag of Words, similitud, "
-    "embeddings y generación de texto."
+    "Explora tokenización, modelos LLM, temperatura, "
+    "Bag of Words y similitud."
 )
 
 
@@ -46,19 +39,10 @@ api_key = st.sidebar.text_input(
     placeholder="gsk_..."
 )
 
-
-# Si no hay API Key, detenemos la aplicación
 if not api_key:
-
-    st.info(
-        "Ingresa tu API Key de Groq en el menú de la izquierda "
-        "para comenzar."
-    )
-
+    st.info("Ingresa tu API Key de Groq para comenzar.")
     st.stop()
 
-
-# Crear cliente de Groq
 client = Groq(api_key=api_key)
 
 
@@ -66,7 +50,7 @@ client = Groq(api_key=api_key)
 # MODELOS
 # ==========================================================
 
-st.sidebar.subheader("🤖 Modelo LLM")
+st.sidebar.subheader("🤖 Modelo")
 
 modelos = [
     "llama-3.1-8b-instant",
@@ -82,53 +66,21 @@ modelo = st.sidebar.selectbox(
 
 
 # ==========================================================
-# PARÁMETROS DEL MODELO
-# ==========================================================
-
-st.sidebar.subheader("⚙️ Parámetros")
-
-temperature = st.sidebar.slider(
-    "Temperatura",
-    min_value=0.0,
-    max_value=2.0,
-    value=0.7,
-    step=0.1
-)
-
-max_tokens = st.sidebar.slider(
-    "Máximo de tokens",
-    min_value=50,
-    max_value=2000,
-    value=500,
-    step=50
-)
-
-top_p = st.sidebar.slider(
-    "Top P",
-    min_value=0.1,
-    max_value=1.0,
-    value=1.0,
-    step=0.1
-)
-
-
-# ==========================================================
 # PESTAÑAS
 # ==========================================================
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
+tab1, tab2, tab3, tab4 = st.tabs(
     [
         "💬 Generación",
-        "🔤 Tokens",
+        "🔤 Tokenización",
         "📚 Bag of Words",
-        "📊 Similitud",
-        "🧠 Embeddings"
+        "📊 Similitud"
     ]
 )
 
 
 # ==========================================================
-# TAB 1 - GENERACIÓN DE TEXTO
+# TAB 1 - GENERACIÓN Y TEMPERATURA
 # ==========================================================
 
 with tab1:
@@ -136,22 +88,46 @@ with tab1:
     st.header("💬 Generación de texto")
 
     st.write(
-        "Escribe una pregunta o instrucción y el modelo "
-        "generará una respuesta."
+        "Modifica la temperatura y observa cómo cambia "
+        "la respuesta del modelo."
     )
 
     prompt = st.text_area(
         "Escribe tu prompt:",
-        placeholder="Explica qué es una red neuronal."
+        value="Explica qué es la inteligencia artificial."
     )
 
-    if st.button("🚀 Generar texto"):
+    st.subheader("🌡️ Temperatura")
+
+    temperature = st.slider(
+        "Selecciona la temperatura",
+        min_value=0.0,
+        max_value=2.0,
+        value=0.7,
+        step=0.1
+    )
+
+    max_tokens = st.slider(
+        "Máximo de tokens",
+        min_value=50,
+        max_value=1000,
+        value=300,
+        step=50
+    )
+
+    top_p = st.slider(
+        "Top P",
+        min_value=0.1,
+        max_value=1.0,
+        value=1.0,
+        step=0.1
+    )
+
+    if st.button("🚀 Generar respuesta"):
 
         if not prompt:
 
-            st.warning(
-                "Por favor, escribe un prompt."
-            )
+            st.warning("Escribe un prompt.")
 
         else:
 
@@ -159,14 +135,12 @@ with tab1:
 
                 response = client.chat.completions.create(
                     model=modelo,
-
                     messages=[
                         {
                             "role": "user",
                             "content": prompt
                         }
                     ],
-
                     temperature=temperature,
                     max_tokens=max_tokens,
                     top_p=top_p
@@ -174,109 +148,300 @@ with tab1:
 
                 respuesta = response.choices[0].message.content
 
-                st.subheader("Respuesta del modelo")
+                st.subheader(
+                    f"Respuesta con temperatura {temperature}"
+                )
 
                 st.write(respuesta)
 
-
-                # ------------------------------------------
-                # INFORMACIÓN DE TOKENS
-                # ------------------------------------------
-
-                st.subheader("📊 Uso de tokens")
+                st.subheader("📊 Tokens utilizados")
 
                 col1, col2, col3 = st.columns(3)
 
                 col1.metric(
-                    "Tokens de entrada",
+                    "Entrada",
                     response.usage.prompt_tokens
                 )
 
                 col2.metric(
-                    "Tokens de salida",
+                    "Salida",
                     response.usage.completion_tokens
                 )
 
                 col3.metric(
-                    "Tokens totales",
+                    "Total",
                     response.usage.total_tokens
                 )
 
-
             except Exception as e:
 
-                st.error(
-                    f"Ocurrió un error al consultar Groq: {e}"
-                )
+                st.error(f"Error: {e}")
 
 
 # ==========================================================
-# TAB 2 - TOKENS
+# COMPARAR TEMPERATURAS
+# ==========================================================
+
+    st.divider()
+
+    st.header("🔬 Comparar diferentes temperaturas")
+
+    st.write(
+        "Genera tres respuestas usando diferentes temperaturas "
+        "para observar cómo cambia la generación."
+    )
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        temp1 = st.number_input(
+            "Temperatura 1",
+            min_value=0.0,
+            max_value=2.0,
+            value=0.0,
+            step=0.1
+        )
+
+    with col2:
+        temp2 = st.number_input(
+            "Temperatura 2",
+            min_value=0.0,
+            max_value=2.0,
+            value=0.7,
+            step=0.1
+        )
+
+    with col3:
+        temp3 = st.number_input(
+            "Temperatura 3",
+            min_value=0.0,
+            max_value=2.0,
+            value=1.5,
+            step=0.1
+        )
+
+    if st.button("🔄 Comparar respuestas"):
+
+        if not prompt:
+
+            st.warning("Escribe un prompt primero.")
+
+        else:
+
+            temperaturas = [
+                temp1,
+                temp2,
+                temp3
+            ]
+
+            for temp in temperaturas:
+
+                try:
+
+                    response = client.chat.completions.create(
+                        model=modelo,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": prompt
+                            }
+                        ],
+                        temperature=temp,
+                        max_tokens=max_tokens,
+                        top_p=top_p
+                    )
+
+                    respuesta = (
+                        response
+                        .choices[0]
+                        .message
+                        .content
+                    )
+
+                    st.subheader(
+                        f"🌡️ Temperatura: {temp}"
+                    )
+
+                    st.write(respuesta)
+
+                    st.caption(
+                        f"Tokens utilizados: "
+                        f"{response.usage.total_tokens}"
+                    )
+
+                except Exception as e:
+
+                    st.error(
+                        f"Error con temperatura {temp}: {e}"
+                    )
+
+
+# ==========================================================
+# TAB 2 - TOKENIZACIÓN
 # ==========================================================
 
 with tab2:
 
-    st.header("🔤 Tokens y Token IDs")
+    st.header("🔤 Tokenización")
 
     st.write(
-        "Los modelos de lenguaje no procesan directamente "
-        "las palabras. Primero dividen el texto en tokens."
+        "Aquí puedes observar cómo diferentes métodos "
+        "dividen un texto en partes."
     )
 
-    texto_tokens = st.text_area(
-        "Escribe un texto:",
-        value="Hola, me gusta la inteligencia artificial."
+    texto = st.text_area(
+        "Escribe una frase:",
+        value="Hola, me gusta aprender inteligencia artificial."
+    )
+
+    metodo = st.selectbox(
+        "Método de tokenización",
+        [
+            "Por palabras",
+            "Por caracteres",
+            "Tokenizer de BERT"
+        ]
     )
 
 
-    if st.button("🔍 Analizar tokens"):
+    # ------------------------------------------------------
+    # FUNCIÓN PARA COLORES
+    # ------------------------------------------------------
 
-        try:
+    def mostrar_tokens_colores(tokens):
 
-            # Tokenizador
-            tokenizer = AutoTokenizer.from_pretrained(
-                "bert-base-multilingual-cased"
-            )
+        colores = [
+            "#FFDDC1",
+            "#C1FFD7",
+            "#C1D4FF",
+            "#F5C1FF",
+            "#FFF3C1",
+            "#D1C1FF",
+            "#FFC1C1"
+        ]
 
-            # Convertir texto en tokens
-            tokens = tokenizer.tokenize(
-                texto_tokens
-            )
+        html = ""
 
-            # Obtener IDs
-            token_ids = tokenizer.convert_tokens_to_ids(
-                tokens
-            )
+        for i, token in enumerate(tokens):
 
+            color = colores[i % len(colores)]
 
-            # Crear tabla
-            datos = pd.DataFrame(
-                {
-                    "Token": tokens,
-                    "Token ID": token_ids
-                }
-            )
+            html += f"""
+            <span style="
+                background-color:{color};
+                padding:6px;
+                margin:3px;
+                border-radius:6px;
+                display:inline-block;
+                border:1px solid #999;
+            ">
+                {token}
+            </span>
+            """
 
-
-            st.subheader("Tokens encontrados")
-
-            st.dataframe(
-                datos,
-                use_container_width=True
-            )
-
-
-            st.metric(
-                "Cantidad de tokens",
-                len(tokens)
-            )
+        st.markdown(
+            html,
+            unsafe_allow_html=True
+        )
 
 
-        except Exception as e:
+    # ------------------------------------------------------
+    # TOKENIZACIÓN
+    # ------------------------------------------------------
 
-            st.error(
-                f"Ocurrió un error al analizar los tokens: {e}"
-            )
+    if st.button("🔍 Tokenizar texto"):
+
+        if not texto:
+
+            st.warning("Escribe un texto.")
+
+        else:
+
+            # ==============================================
+            # POR PALABRAS
+            # ==============================================
+
+            if metodo == "Por palabras":
+
+                tokens = re.findall(
+                    r"\w+|[^\w\s]",
+                    texto,
+                    re.UNICODE
+                )
+
+                st.subheader("Tokens")
+
+                mostrar_tokens_colores(tokens)
+
+                st.write(
+                    f"Cantidad de tokens: **{len(tokens)}**"
+                )
+
+
+            # ==============================================
+            # POR CARACTERES
+            # ==============================================
+
+            elif metodo == "Por caracteres":
+
+                tokens = list(texto)
+
+                st.subheader("Caracteres")
+
+                mostrar_tokens_colores(tokens)
+
+                st.write(
+                    f"Cantidad de caracteres: **{len(tokens)}**"
+                )
+
+
+            # ==============================================
+            # TOKENIZER DE BERT
+            # ==============================================
+
+            else:
+
+                try:
+
+                    tokenizer = AutoTokenizer.from_pretrained(
+                        "bert-base-multilingual-cased"
+                    )
+
+                    tokens = tokenizer.tokenize(texto)
+
+                    token_ids = (
+                        tokenizer.convert_tokens_to_ids(tokens)
+                    )
+
+                    st.subheader(
+                        "Tokens del modelo"
+                    )
+
+                    mostrar_tokens_colores(tokens)
+
+                    st.write(
+                        f"Cantidad de tokens: **{len(tokens)}**"
+                    )
+
+                    st.subheader("Token IDs")
+
+                    df = pd.DataFrame(
+                        {
+                            "Token": tokens,
+                            "Token ID": token_ids
+                        }
+                    )
+
+                    st.dataframe(
+                        df,
+                        use_container_width=True
+                    )
+
+                except Exception as e:
+
+                    st.error(
+                        f"Error con el tokenizer: {e}"
+                    )
 
 
 # ==========================================================
@@ -287,23 +452,15 @@ with tab3:
 
     st.header("📚 Bag of Words")
 
-    st.write(
-        "Bag of Words representa los textos utilizando "
-        "la frecuencia de las palabras."
-    )
-
-
     texto1 = st.text_area(
         "Texto 1:",
         value="La inteligencia artificial aprende de los datos."
     )
 
-
     texto2 = st.text_area(
         "Texto 2:",
         value="La inteligencia artificial procesa información."
     )
-
 
     if st.button("📊 Crear Bag of Words"):
 
@@ -312,22 +469,14 @@ with tab3:
             texto2
         ]
 
-
-        # Crear vectorizador
         vectorizer = CountVectorizer()
 
-
-        # Crear matriz
         matriz = vectorizer.fit_transform(
             documentos
         )
 
-
-        # Obtener palabras
         palabras = vectorizer.get_feature_names_out()
 
-
-        # Crear DataFrame
         df_bow = pd.DataFrame(
             matriz.toarray(),
             columns=palabras,
@@ -337,19 +486,11 @@ with tab3:
             ]
         )
 
-
         st.subheader("Matriz Bag of Words")
 
         st.dataframe(
             df_bow,
             use_container_width=True
-        )
-
-
-        st.subheader("Palabras encontradas")
-
-        st.write(
-            ", ".join(palabras)
         )
 
 
@@ -359,25 +500,17 @@ with tab3:
 
 with tab4:
 
-    st.header("📊 Métrica de similitud")
-
-    st.write(
-        "Se utiliza la similitud del coseno para comparar "
-        "los dos textos."
-    )
-
+    st.header("📊 Similitud entre textos")
 
     texto_a = st.text_area(
         "Texto A:",
         value="Me gusta aprender inteligencia artificial."
     )
 
-
     texto_b = st.text_area(
         "Texto B:",
         value="Me interesa estudiar inteligencia artificial."
     )
-
 
     if st.button("📐 Calcular similitud"):
 
@@ -386,154 +519,25 @@ with tab4:
             texto_b
         ]
 
-
-        # Convertir textos en vectores
         vectorizer = CountVectorizer()
 
         matriz = vectorizer.fit_transform(
             documentos
         )
 
-
-        # Calcular similitud
         similitud = cosine_similarity(
             matriz[0],
             matriz[1]
         )
 
-
         valor = similitud[0][0]
-
-
-        st.subheader("Resultado")
 
         st.metric(
             "Similitud del coseno",
             f"{valor:.4f}"
         )
 
-
         st.progress(
             float(valor)
         )
-
-
-        if valor >= 0.8:
-
-            st.success(
-                "Los textos tienen una similitud alta."
-            )
-
-        elif valor >= 0.5:
-
-            st.info(
-                "Los textos tienen una similitud media."
-            )
-
-        else:
-
-            st.warning(
-                "Los textos tienen una similitud baja."
-            )
-
-
-# ==========================================================
-# TAB 5 - EMBEDDINGS
-# ==========================================================
-
-with tab5:
-
-    st.header("🧠 Embeddings")
-
-    st.write(
-        "Un embedding representa un texto mediante "
-        "valores numéricos."
-    )
-
-    st.info(
-        "En esta demostración utilizamos una representación "
-        "vectorial basada en las palabras del texto."
-    )
-
-
-    texto_embedding = st.text_area(
-        "Escribe un texto:",
-        value="La inteligencia artificial es una tecnología."
-    )
-
-
-    if st.button("🧮 Generar representación"):
-
-        try:
-
-            vectorizer = CountVectorizer()
-
-
-            matriz = vectorizer.fit_transform(
-                [texto_embedding]
-            )
-
-
-            vector = matriz.toarray()[0]
-
-
-            palabras = (
-                vectorizer
-                .get_feature_names_out()
-            )
-
-
-            df_embedding = pd.DataFrame(
-                {
-                    "Palabra": palabras,
-                    "Valor": vector
-                }
-            )
-
-
-            st.subheader(
-                "Representación vectorial"
-            )
-
-
-            st.dataframe(
-                df_embedding,
-                use_container_width=True
-            )
-
-
-            # ------------------------------------------
-            # GRÁFICA
-            # ------------------------------------------
-
-            fig = px.bar(
-                df_embedding,
-                x="Palabra",
-                y="Valor",
-                title="Representación vectorial del texto"
-            )
-
-
-            st.plotly_chart(
-                fig,
-                use_container_width=True
-            )
-
-
-        except Exception as e:
-
-            st.error(
-                f"Ocurrió un error generando la representación: {e}"
-            )
-
-
-# ==========================================================
-# INFORMACIÓN
-# ==========================================================
-
-st.sidebar.markdown("---")
-
-st.sidebar.info(
-    "LLM Explorer desarrollado con Streamlit, "
-    "Groq y herramientas de procesamiento de lenguaje natural."
-)
+```
