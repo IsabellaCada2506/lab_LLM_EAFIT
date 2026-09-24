@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import pandas as pd
 import re
@@ -540,4 +539,3 @@ with tab4:
         st.progress(
             float(valor)
         )
-```
