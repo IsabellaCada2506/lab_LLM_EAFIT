@@ -1,8 +1,11 @@
-
 streamlit
 groq
 transformers
+torch
 scikit-learn
 numpy
 pandas
 plotly
+openai
+pillow
+pytesseract
